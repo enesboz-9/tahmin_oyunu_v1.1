@@ -9,8 +9,7 @@ import json
 import os
 import base64
 
-# --- Wikipedia Kimlik Tanımlama ---
-# Wikipedia'nın bizi bot olarak engellememesi için kendimizi tanıtıyoruz
+# --- Wikipedia Kimlik Tanımlama (Erişim Engeli İçin) ---
 wikipedia.set_user_agent("FutbolTahminOyunu/1.0 (iletisim@ornek.com)")
 
 # --- Sayfa Ayarları ---
@@ -25,18 +24,17 @@ def play_sound(file_path):
             md = f'<audio autoplay="true"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
             st.components.v1.html(md, height=0)
 
-# --- Wikipedia'dan Resim Çekme (Geliştirilmiş) ---
+# --- Wikipedia'dan Resim Çekme ---
 @st.cache_data(ttl=86400)
 def get_wiki_image(player_name):
     try:
-        # Futbolcu olduğunu belirtmek için arama terimini güçlendiriyoruz
         search_results = wikipedia.search(player_name + " footballer")
         if not search_results:
             return None
         
         page = wikipedia.page(search_results[0], auto_suggest=False)
         
-        # Sadece gerçek resim formatlarını al, logo ve bayrakları ele
+        # Sadece gerçek resim formatlarını al
         valid_images = [img for img in page.images if img.lower().endswith(('.jpg', '.jpeg', '.png')) 
                         and "logo" not in img.lower() 
                         and "flag" not in img.lower()
@@ -50,7 +48,6 @@ def get_wiki_image(player_name):
 @st.cache_data
 def fetch_image(url):
     try:
-        # Wikipedia sunucularına bir tarayıcıymış gibi istek gönderiyoruz (Erişim engeli için)
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
@@ -86,21 +83,17 @@ if "game_init" not in st.session_state:
 # --- BAŞLANGIÇ EKRANI ---
 if not st.session_state.game_init:
     st.title("⚽ Futbolcu Tahmin Maratonu")
-    st.write("Wikipedia üzerinden canlı resimlerle futbolcuları tanı!")
     
     if players_by_diff:
         diff = st.selectbox("Zorluk Seviyesi Seçin:", list(players_by_diff.keys()))
-        
         if st.button("Oyuna Başla"):
             st.session_state.difficulty = diff
-            # Zorluğa göre bulanıklık ayarları
             if diff == "Kolay":
                 st.session_state.blur_levels, st.session_state.multiplier = [15, 10, 5, 2, 0], 1
             elif diff == "Orta":
                 st.session_state.blur_levels, st.session_state.multiplier = [30, 20, 10, 5, 0], 2
             else:
                 st.session_state.blur_levels, st.session_state.multiplier = [50, 35, 20, 8, 0], 3
-                
             st.session_state.game_init = True
             st.rerun()
     else:
@@ -127,7 +120,7 @@ if st.session_state.target_player is None and not st.session_state.game_finished
 if st.session_state.game_finished:
     st.balloons()
     st.header("🏆 Tur Tamamlandı!")
-    st.metric("Toplam Puanınız", st.session_state.total_score)
+    st.metric("Toplam Puan", st.session_state.total_score)
     if st.button("🔄 Tekrar Oyna"):
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
@@ -143,18 +136,12 @@ image_url = get_wiki_image(player['name'])
 if image_url:
     raw_img = fetch_image(image_url)
     if raw_img:
-        # Bulanıklığı ayarla
         idx = min(st.session_state.attempts, 4)
         blur_val = st.session_state.blur_levels[idx]
-        
-        if blur_val > 0:
-            display_img = raw_img.filter(ImageFilter.GaussianBlur(blur_val))
-        else:
-            display_img = raw_img
-            
+        display_img = raw_img.filter(ImageFilter.GaussianBlur(blur_val)) if blur_val > 0 else raw_img
         image_placeholder.image(display_img, use_container_width=True)
     else:
-        st.warning("Resim indirilemedi, pas geçiliyor...")
+        st.warning("Resim indirilemedi, yeni oyuncu seçiliyor...")
         time.sleep(1)
         st.session_state.target_player = None
         st.rerun()
@@ -177,7 +164,6 @@ with st.form("guess_form", clear_on_submit=True):
 
 if submit:
     correct_name = player['name'].lower()
-    # Basit bir benzerlik kontrolü (isim içinde geçiyorsa)
     if user_guess and (user_guess in correct_name and len(user_guess) > 3):
         play_sound("sounds/goal.mp3")
         image_placeholder.image(raw_img, use_container_width=True, caption=f"TEBRİKLER! {player['name']}")
@@ -192,8 +178,8 @@ if submit:
         st.session_state.attempts += 1
         if st.session_state.attempts >= 5:
             play_sound("sounds/whistle.mp3")
-            image_placeholder.image(raw_img, use_container_width=True, caption=f"Doğru Cevap: {player['name']}")
-            st.error(f"❌ Haklarınız bitti! Cevap: {player['name']}")
+            image_placeholder.image(raw_img, use_container_width=True, caption=f"Cevap: {player['name']}")
+            st.error(f"❌ Hak bitti! Cevap: {player['name']}")
             time.sleep(3)
             st.session_state.target_player = None
             st.session_state.current_question += 1
@@ -202,7 +188,16 @@ if submit:
             st.warning(f"❌ Yanlış! {5 - st.session_state.attempts} hakkınız kaldı.")
             st.rerun()
 
+# --- PAS GEÇME MANTIĞI (GÜNCELLENDİ) ---
 if pass_btn:
+    # Resmi netleştir ve ismi göster
+    image_placeholder.image(raw_img, use_container_width=True, caption=f"Pas Geçildi. Cevap: {player['name']}")
+    st.info(f"⏭️ Pas geçtiniz. Doğru cevap: **{player['name']}**")
+    
+    # 3 saniye bekle
+    time.sleep(3)
+    
+    # Sonraki soruya geç
     st.session_state.target_player = None
     st.session_state.current_question += 1
     st.rerun()
